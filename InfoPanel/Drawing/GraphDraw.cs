@@ -271,6 +271,7 @@ namespace InfoPanel.Drawing
 
                                         float lastX = 0;
                                         float lastY = 0;
+                                        var points = new SKPoint[size];
 
                                         for (int i = 0; i < size; i++)
                                         {
@@ -293,6 +294,7 @@ namespace InfoPanel.Drawing
                                             lastX = (int)frameRect.Left + (int)frameRect.Width - (i * graphDisplayItem.Step);
                                             lastY = (int)frameRect.Top + (int)(frameRect.Height - (value + (graphDisplayItem.Thickness / 2.0)));
 
+                                            points[i] = new SKPoint(lastX, lastY);
                                             path.LineTo(lastX, lastY);
                                         }
 
@@ -301,10 +303,27 @@ namespace InfoPanel.Drawing
 
                                         if (graphDisplayItem.Fill)
                                         {
-                                            g.FillPath(path, SKColor.Parse(graphDisplayItem.FillColor));
+                                            var baseline = (int)frameRect.Top + graphDisplayItem.Height + graphDisplayItem.Thickness;
+
+                                            for (int i = 0; i < size - 1; i++)
+                                            {
+                                                using var fillPath = new SKPath();
+                                                fillPath.MoveTo(points[i]);
+                                                fillPath.LineTo(points[i + 1]);
+                                                fillPath.LineTo(points[i + 1].X, baseline);
+                                                fillPath.LineTo(points[i].X, baseline);
+                                                fillPath.Close();
+                                                g.FillPath(fillPath, GetGraphFillColor(graphDisplayItem, values[i]));
+                                            }
                                         }
 
-                                        g.DrawPath(path, SKColor.Parse(graphDisplayItem.Color), graphDisplayItem.Thickness);
+                                        for (int i = 0; i < size - 1; i++)
+                                        {
+                                            using var segmentPath = new SKPath();
+                                            segmentPath.MoveTo(points[i]);
+                                            segmentPath.LineTo(points[i + 1]);
+                                            g.DrawPath(segmentPath, GetGraphColor(graphDisplayItem, values[i]), graphDisplayItem.Thickness);
+                                        }
 
                                         break;
                                     }
@@ -360,10 +379,7 @@ namespace InfoPanel.Drawing
                                                 g.FillRectangle(graphDisplayItem.FillColor, (int)refRect.Left, (int)refRect.Top, (int)refRect.Width, (int)refRect.Height);
                                             }
 
-                                            if (SKColor.TryParse(graphDisplayItem.Color, out var color))
-                                            {
-                                                g.DrawRectangle(color, penSize, (int)refRect.Left, (int)refRect.Top, (int)refRect.Width, (int)refRect.Height);
-                                            }
+                                            g.DrawRectangle(GetGraphColor(graphDisplayItem, values[i]), penSize, (int)refRect.Left, (int)refRect.Top, (int)refRect.Width, (int)refRect.Height);
 
                                             // Move refRect horizontally for the next rectangle
                                             refRect = new SKRect(
@@ -453,7 +469,7 @@ namespace InfoPanel.Drawing
                             }
 
                             // Draw the bar if it has size
-                            if (value > 0 && SKColor.TryParse(barDisplayItem.Color, out var barColor))
+                            if (value > 0 && SKColor.TryParse(GetThresholdColor(barDisplayItem, sensorReading?.ValueNow ?? 0), out var barColor))
                             {
                                 if (barDisplayItem.Gradient && SKColor.TryParse(barDisplayItem.GradientColor, out var gradientColor))
                                 {
@@ -516,6 +532,31 @@ namespace InfoPanel.Drawing
                     g.DrawPath(framePath, frameColor, 1);
                 }
             }
+        }
+
+        private static SKColor GetGraphColor(GraphDisplayItem graphDisplayItem, double value)
+        {
+            return SKColor.Parse(GetThresholdColor(graphDisplayItem, value));
+        }
+
+        private static SKColor GetGraphFillColor(GraphDisplayItem graphDisplayItem, double value)
+        {
+            var color = graphDisplayItem.Threshold2.HasValue && value >= graphDisplayItem.Threshold2.Value
+                ? graphDisplayItem.Threshold2Color
+                : graphDisplayItem.Threshold.HasValue && value >= graphDisplayItem.Threshold.Value
+                    ? graphDisplayItem.ThresholdColor
+                    : graphDisplayItem.FillColor;
+
+            return SKColor.Parse(color);
+        }
+
+        private static string GetThresholdColor(ChartDisplayItem chartDisplayItem, double value)
+        {
+            return chartDisplayItem.Threshold2.HasValue && value >= chartDisplayItem.Threshold2.Value
+                ? chartDisplayItem.Threshold2Color
+                : chartDisplayItem.Threshold.HasValue && value >= chartDisplayItem.Threshold.Value
+                    ? chartDisplayItem.ThresholdColor
+                    : chartDisplayItem.Color;
         }
 
         public static double Interpolate(double A, double B, double t)
