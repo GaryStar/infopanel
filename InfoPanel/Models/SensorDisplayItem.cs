@@ -196,6 +196,26 @@ namespace InfoPanel.Models
             }
         }
 
+        private bool _autoScale = false;
+        public bool AutoScale
+        {
+            get { return _autoScale; }
+            set
+            {
+                SetProperty(ref _autoScale, value);
+            }
+        }
+
+        private bool _separateUnitWithSpace = false;
+        public bool SeparateUnitWithSpace
+        {
+            get { return _separateUnitWithSpace; }
+            set
+            {
+                SetProperty(ref _separateUnitWithSpace, value);
+            }
+        }
+
         private bool _overridePrecision = false;
         public bool OverridePrecision
         {
@@ -388,6 +408,7 @@ namespace InfoPanel.Models
         private string EvaluateText(SensorReading sensorReading)
         {
             string? value;
+            var displayUnit = OverrideUnit ? Unit : sensorReading.Unit;
             // new string sensor handling
             if (!string.IsNullOrEmpty(sensorReading.ValueText))
             {
@@ -435,6 +456,11 @@ namespace InfoPanel.Models
                     sensorReadingValue = Math.Abs(sensorReadingValue);
                 }
 
+                if (AutoScale)
+                {
+                    (sensorReadingValue, displayUnit) = ScaleValueAndUnit(sensorReadingValue, displayUnit);
+                }
+
 
                 if (OverridePrecision)
                 {
@@ -456,7 +482,7 @@ namespace InfoPanel.Models
                 }
                 else
                 {
-                    switch (sensorReading.Unit.ToLower())
+                    switch (displayUnit.ToLower())
                     {
                         case "gb":
                             value = string.Format("{0:0.0}", sensorReadingValue);
@@ -489,14 +515,7 @@ namespace InfoPanel.Models
 
             if (ShowUnit)
             {
-                if (OverrideUnit)
-                {
-                    value += Unit;
-                }
-                else
-                {
-                    value += sensorReading.Unit;
-                }
+                value += SeparateUnitWithSpace ? " " + displayUnit : displayUnit;
             }
 
             if (ShowName)
@@ -506,6 +525,92 @@ namespace InfoPanel.Models
 
             return value;
 
+        }
+
+        private static (double Value, string Unit) ScaleValueAndUnit(double value, string unit)
+        {
+            if (!TryGetBaseUnit(unit, out var baseUnit))
+            {
+                return (value, unit);
+            }
+
+            var prefixes = new[]
+            {
+                (Symbol: "m", Factor: 0.001),
+                (Symbol: "", Factor: 1.0),
+                (Symbol: "K", Factor: 1_000.0),
+                (Symbol: "M", Factor: 1_000_000.0),
+                (Symbol: "G", Factor: 1_000_000_000.0),
+                (Symbol: "T", Factor: 1_000_000_000_000.0),
+                (Symbol: "P", Factor: 1_000_000_000_000_000.0),
+            };
+
+            var prefixIndex = 1;
+            var magnitude = Math.Abs(value);
+
+            while (magnitude >= 1000 && prefixIndex < prefixes.Length - 1)
+            {
+                prefixIndex++;
+                magnitude /= 1000;
+            }
+
+            while (magnitude > 0 && magnitude < 1 && prefixIndex > 0)
+            {
+                prefixIndex--;
+                magnitude *= 1000;
+            }
+
+            return (value / prefixes[prefixIndex].Factor, prefixes[prefixIndex].Symbol + baseUnit);
+        }
+
+        private static bool TryGetBaseUnit(string unit, out string baseUnit)
+        {
+            baseUnit = string.Empty;
+
+            var normalizedUnit = unit?.Trim() ?? string.Empty;
+            var baseUnits = new[] { "B/s", "Hz", "Pa", "B", "W", "V", "A" };
+            var prefixes = new[]
+            {
+                "m",
+                "K",
+                "M",
+                "G",
+                "T",
+                "P",
+            };
+
+            if (normalizedUnit.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var candidate in baseUnits)
+            {
+                if (normalizedUnit.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+                {
+                    baseUnit = candidate;
+                    return true;
+                }
+            }
+
+            foreach (var prefix in prefixes)
+            {
+                if (normalizedUnit.StartsWith(prefix, StringComparison.Ordinal)
+                    && normalizedUnit.Length > prefix.Length)
+                {
+                    var candidate = normalizedUnit[prefix.Length..];
+                    foreach (var baseUnitCandidate in baseUnits)
+                    {
+                        if (candidate.Equals(baseUnitCandidate, StringComparison.OrdinalIgnoreCase))
+                        {
+                            baseUnit = baseUnitCandidate;
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
         }
     }
 }
