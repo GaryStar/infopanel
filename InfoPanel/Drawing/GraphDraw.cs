@@ -1,4 +1,4 @@
-using InfoPanel.Models;
+﻿using InfoPanel.Models;
 using InfoPanel.Monitors;
 using InfoPanel.Plugins;
 using LibreHardwareMonitor.Hardware;
@@ -301,28 +301,56 @@ namespace InfoPanel.Drawing
                                         // End point for fill area
                                         path.LineTo(lastX - graphDisplayItem.Thickness, (int)frameRect.Top + graphDisplayItem.Height + graphDisplayItem.Thickness);
 
-                                        if (graphDisplayItem.Fill)
-                                        {
-                                            var baseline = (int)frameRect.Top + graphDisplayItem.Height + graphDisplayItem.Thickness;
+                                        var hasThresholds = graphDisplayItem.Threshold.HasValue || graphDisplayItem.Threshold2.HasValue;
 
-                                            for (int i = 0; i < size - 1; i++)
+                                        if (!hasThresholds)
+                                        {
+                                            // No thresholds: keep the original single fill + single stroke.
+                                            if (graphDisplayItem.Fill)
                                             {
-                                                using var fillPath = new SKPath();
-                                                fillPath.MoveTo(points[i]);
-                                                fillPath.LineTo(points[i + 1]);
-                                                fillPath.LineTo(points[i + 1].X, baseline);
-                                                fillPath.LineTo(points[i].X, baseline);
-                                                fillPath.Close();
-                                                g.FillPath(fillPath, GetGraphFillColor(graphDisplayItem, values[i]));
+                                                g.FillPath(path, SKColor.Parse(graphDisplayItem.FillColor));
                                             }
+
+                                            g.DrawPath(path, SKColor.Parse(graphDisplayItem.Color), graphDisplayItem.Thickness);
+                                            break;
                                         }
 
-                                        for (int i = 0; i < size - 1; i++)
+                                        // Thresholds: group consecutive points that share a threshold level so the
+                                        // graph is only split where the colour actually changes. Segment i (points i
+                                        // to i+1) takes the level of values[i].
+                                        var baseline = (int)frameRect.Top + graphDisplayItem.Height + graphDisplayItem.Thickness;
+                                        var runStart = 0;
+
+                                        while (runStart < size - 1)
                                         {
-                                            using var segmentPath = new SKPath();
-                                            segmentPath.MoveTo(points[i]);
-                                            segmentPath.LineTo(points[i + 1]);
-                                            g.DrawPath(segmentPath, GetGraphColor(graphDisplayItem, values[i]), graphDisplayItem.Thickness);
+                                            var runLevel = GetThresholdLevel(graphDisplayItem, values[runStart]);
+                                            var runEnd = runStart + 1;
+
+                                            while (runEnd < size - 1 && GetThresholdLevel(graphDisplayItem, values[runEnd]) == runLevel)
+                                            {
+                                                runEnd++;
+                                            }
+
+                                            using var runPath = new SKPath();
+                                            runPath.MoveTo(points[runStart]);
+
+                                            for (int i = runStart + 1; i <= runEnd; i++)
+                                            {
+                                                runPath.LineTo(points[i]);
+                                            }
+
+                                            if (graphDisplayItem.Fill)
+                                            {
+                                                using var fillPath = new SKPath(runPath);
+                                                fillPath.LineTo(points[runEnd].X, baseline);
+                                                fillPath.LineTo(points[runStart].X, baseline);
+                                                fillPath.Close();
+                                                g.FillPath(fillPath, GetGraphFillColor(graphDisplayItem, runLevel));
+                                            }
+
+                                            g.DrawPath(runPath, SKColor.Parse(GetThresholdColor(graphDisplayItem, runLevel)), graphDisplayItem.Thickness);
+
+                                            runStart = runEnd;
                                         }
 
                                         break;
@@ -539,24 +567,45 @@ namespace InfoPanel.Drawing
             return SKColor.Parse(GetThresholdColor(graphDisplayItem, value));
         }
 
-        private static SKColor GetGraphFillColor(GraphDisplayItem graphDisplayItem, double value)
+        private static SKColor GetGraphFillColor(GraphDisplayItem graphDisplayItem, int level)
         {
-            var color = graphDisplayItem.Threshold2.HasValue && value >= graphDisplayItem.Threshold2.Value
-                ? graphDisplayItem.Threshold2Color
-                : graphDisplayItem.Threshold.HasValue && value >= graphDisplayItem.Threshold.Value
-                    ? graphDisplayItem.ThresholdColor
-                    : graphDisplayItem.FillColor;
+            return SKColor.Parse(level switch
+            {
+                2 => graphDisplayItem.Threshold2Color,
+                1 => graphDisplayItem.ThresholdColor,
+                _ => graphDisplayItem.FillColor,
+            });
+        }
 
-            return SKColor.Parse(color);
+        /// <summary>Returns 0 (below both thresholds), 1 (at or above threshold 1) or 2 (at or above threshold 2).</summary>
+        private static int GetThresholdLevel(ChartDisplayItem chartDisplayItem, double value)
+        {
+            if (chartDisplayItem.Threshold2.HasValue && value >= chartDisplayItem.Threshold2.Value)
+            {
+                return 2;
+            }
+
+            if (chartDisplayItem.Threshold.HasValue && value >= chartDisplayItem.Threshold.Value)
+            {
+                return 1;
+            }
+
+            return 0;
         }
 
         private static string GetThresholdColor(ChartDisplayItem chartDisplayItem, double value)
         {
-            return chartDisplayItem.Threshold2.HasValue && value >= chartDisplayItem.Threshold2.Value
-                ? chartDisplayItem.Threshold2Color
-                : chartDisplayItem.Threshold.HasValue && value >= chartDisplayItem.Threshold.Value
-                    ? chartDisplayItem.ThresholdColor
-                    : chartDisplayItem.Color;
+            return GetThresholdColor(chartDisplayItem, GetThresholdLevel(chartDisplayItem, value));
+        }
+
+        private static string GetThresholdColor(ChartDisplayItem chartDisplayItem, int level)
+        {
+            return level switch
+            {
+                2 => chartDisplayItem.Threshold2Color,
+                1 => chartDisplayItem.ThresholdColor,
+                _ => chartDisplayItem.Color,
+            };
         }
 
         public static double Interpolate(double A, double B, double t)
