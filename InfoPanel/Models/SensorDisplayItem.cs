@@ -456,11 +456,11 @@ namespace InfoPanel.Models
                     sensorReadingValue = Math.Abs(sensorReadingValue);
                 }
 
+                var autoScaled = false;
                 if (AutoScale)
                 {
-                    (sensorReadingValue, displayUnit) = ScaleValueAndUnit(sensorReadingValue, displayUnit);
+                    autoScaled = TryScaleValueAndUnit(sensorReadingValue, displayUnit, out sensorReadingValue, out displayUnit);
                 }
-
 
                 if (OverridePrecision)
                 {
@@ -480,9 +480,19 @@ namespace InfoPanel.Models
                             break;
                     }
                 }
+                else if (autoScaled)
+                {
+                    // Scaled values live in 1..999; keep roughly three significant digits.
+                    var magnitude = Math.Abs(sensorReadingValue);
+                    value = magnitude < 10
+                        ? string.Format("{0:0.00}", sensorReadingValue)
+                        : magnitude < 100
+                            ? string.Format("{0:0.0}", sensorReadingValue)
+                            : string.Format("{0:0}", sensorReadingValue);
+                }
                 else
                 {
-                    switch (displayUnit.ToLower())
+                    switch (sensorReading.Unit.ToLower())
                     {
                         case "gb":
                             value = string.Format("{0:0.0}", sensorReadingValue);
@@ -527,64 +537,79 @@ namespace InfoPanel.Models
 
         }
 
-        private static (double Value, string Unit) ScaleValueAndUnit(double value, string unit)
+        private static readonly (string Symbol, double Factor)[] ScalePrefixes =
+        [
+            ("m", 0.001),
+            ("", 1.0),
+            ("K", 1_000.0),
+            ("M", 1_000_000.0),
+            ("G", 1_000_000_000.0),
+            ("T", 1_000_000_000_000.0),
+            ("P", 1_000_000_000_000_000.0),
+        ];
+
+        private static readonly string[] ScaleBaseUnits = ["B/s", "Hz", "Pa", "B", "W", "V", "A"];
+
+        /// <summary>
+        /// Rescales a value so it reads between 1 and 999, moving the SI prefix on the unit accordingly.
+        /// The prefix already present on the incoming unit (for example the "M" in "MB/s") is honoured,
+        /// so 1500 MB/s becomes 1.5 GB/s rather than 1.5 KB/s.
+        /// </summary>
+        private static bool TryScaleValueAndUnit(double value, string unit, out double scaledValue, out string scaledUnit)
         {
-            if (!TryGetBaseUnit(unit, out var baseUnit))
+            scaledValue = value;
+            scaledUnit = unit;
+
+            if (!TryParseScaledUnit(unit, out var baseUnit, out var sourceFactor))
             {
-                return (value, unit);
+                return false;
             }
 
-            var prefixes = new[]
-            {
-                (Symbol: "m", Factor: 0.001),
-                (Symbol: "", Factor: 1.0),
-                (Symbol: "K", Factor: 1_000.0),
-                (Symbol: "M", Factor: 1_000_000.0),
-                (Symbol: "G", Factor: 1_000_000_000.0),
-                (Symbol: "T", Factor: 1_000_000_000_000.0),
-                (Symbol: "P", Factor: 1_000_000_000_000_000.0),
-            };
+            var baseValue = value * sourceFactor;
+            var magnitude = Math.Abs(baseValue);
 
-            var prefixIndex = 1;
-            var magnitude = Math.Abs(value);
-
-            while (magnitude >= 1000 && prefixIndex < prefixes.Length - 1)
+            if (magnitude == 0 || double.IsNaN(magnitude) || double.IsInfinity(magnitude))
             {
-                prefixIndex++;
+                return false;
+            }
+
+            // Bytes have no meaningful sub-unit, so never drop to "mB".
+            var minIndex = baseUnit.StartsWith('B') ? 1 : 0;
+            var index = 1;
+
+            while (magnitude >= 1000 && index < ScalePrefixes.Length - 1)
+            {
+                index++;
                 magnitude /= 1000;
             }
 
-            while (magnitude > 0 && magnitude < 1 && prefixIndex > 0)
+            while (magnitude < 1 && index > minIndex)
             {
-                prefixIndex--;
+                index--;
                 magnitude *= 1000;
             }
 
-            return (value / prefixes[prefixIndex].Factor, prefixes[prefixIndex].Symbol + baseUnit);
+            scaledValue = baseValue / ScalePrefixes[index].Factor;
+            scaledUnit = ScalePrefixes[index].Symbol + baseUnit;
+            return true;
         }
 
-        private static bool TryGetBaseUnit(string unit, out string baseUnit)
+        /// <summary>
+        /// Splits a unit such as "MB/s" into its base unit ("B/s") and the factor of its SI prefix (1e6).
+        /// </summary>
+        private static bool TryParseScaledUnit(string? unit, out string baseUnit, out double factor)
         {
             baseUnit = string.Empty;
+            factor = 1.0;
 
             var normalizedUnit = unit?.Trim() ?? string.Empty;
-            var baseUnits = new[] { "B/s", "Hz", "Pa", "B", "W", "V", "A" };
-            var prefixes = new[]
-            {
-                "m",
-                "K",
-                "M",
-                "G",
-                "T",
-                "P",
-            };
-
             if (normalizedUnit.Length == 0)
             {
                 return false;
             }
 
-            foreach (var candidate in baseUnits)
+            // Bare base units first, so "Pa" is pascal rather than peta-ampere.
+            foreach (var candidate in ScaleBaseUnits)
             {
                 if (normalizedUnit.Equals(candidate, StringComparison.OrdinalIgnoreCase))
                 {
@@ -593,19 +618,30 @@ namespace InfoPanel.Models
                 }
             }
 
-            foreach (var prefix in prefixes)
+            foreach (var (symbol, prefixFactor) in ScalePrefixes)
             {
-                if (normalizedUnit.StartsWith(prefix, StringComparison.Ordinal)
-                    && normalizedUnit.Length > prefix.Length)
+                if (symbol.Length == 0)
                 {
-                    var candidate = normalizedUnit[prefix.Length..];
-                    foreach (var baseUnitCandidate in baseUnits)
+                    continue;
+                }
+
+                // Kilo is commonly written both "K" and "k"; other prefixes are case sensitive (m vs M).
+                var matchesPrefix = normalizedUnit.StartsWith(symbol, StringComparison.Ordinal)
+                    || (symbol == "K" && normalizedUnit.StartsWith('k'));
+
+                if (!matchesPrefix || normalizedUnit.Length <= symbol.Length)
+                {
+                    continue;
+                }
+
+                var remainder = normalizedUnit[symbol.Length..];
+                foreach (var candidate in ScaleBaseUnits)
+                {
+                    if (remainder.Equals(candidate, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (candidate.Equals(baseUnitCandidate, StringComparison.OrdinalIgnoreCase))
-                        {
-                            baseUnit = baseUnitCandidate;
-                            return true;
-                        }
+                        baseUnit = candidate;
+                        factor = prefixFactor;
+                        return true;
                     }
                 }
             }
