@@ -81,13 +81,17 @@ namespace InfoPanel.ViewModels.Components
         }
     }
 
-    public partial class HwInfoHardwareTreeItem : TreeItem
+    public partial class HwInfoHardwareTreeItem : SensorTreeItem
     {
         private static readonly string IconBase = "pack://application:,,,/Resources/Images/Libre/";
 
         public HwInfoHardwareTreeItem(object id, string name) : base(id, name)
         {
             Icon = IconBase + GetImage(name);
+        }
+
+        public override void Update()
+        {
         }
 
         private static string GetImage(string name)

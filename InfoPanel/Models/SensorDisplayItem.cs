@@ -206,6 +206,16 @@ namespace InfoPanel.Models
             }
         }
 
+        private bool _ignoreUnitOnAutoScale = false;
+        public bool IgnoreUnitOnAutoScale
+        {
+            get { return _ignoreUnitOnAutoScale; }
+            set
+            {
+                SetProperty(ref _ignoreUnitOnAutoScale, value);
+            }
+        }
+
         private bool _separateUnitWithSpace = false;
         public bool SeparateUnitWithSpace
         {
@@ -459,7 +469,7 @@ namespace InfoPanel.Models
                 var autoScaled = false;
                 if (AutoScale)
                 {
-                    autoScaled = TryScaleValueAndUnit(sensorReadingValue, displayUnit, out sensorReadingValue, out displayUnit);
+                    autoScaled = TryScaleValueAndUnit(sensorReadingValue, displayUnit, IgnoreUnitOnAutoScale, out sensorReadingValue, out displayUnit);
                 }
 
                 if (OverridePrecision)
@@ -555,7 +565,7 @@ namespace InfoPanel.Models
         /// The prefix already present on the incoming unit (for example the "M" in "MB/s") is honoured,
         /// so 1500 MB/s becomes 1.5 GB/s rather than 1.5 KB/s.
         /// </summary>
-        private static bool TryScaleValueAndUnit(double value, string unit, out double scaledValue, out string scaledUnit)
+        private static bool TryScaleValueAndUnit(double value, string unit, bool ignoreUnitMagnitude, out double scaledValue, out string scaledUnit)
         {
             scaledValue = value;
             scaledUnit = unit;
@@ -565,7 +575,7 @@ namespace InfoPanel.Models
                 return false;
             }
 
-            var baseValue = value * sourceFactor;
+            var baseValue = value * (ignoreUnitMagnitude ? 1.0 : sourceFactor);
             var magnitude = Math.Abs(baseValue);
 
             if (magnitude == 0 || double.IsNaN(magnitude) || double.IsInfinity(magnitude))

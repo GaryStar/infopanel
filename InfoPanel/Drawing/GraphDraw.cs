@@ -531,7 +531,8 @@ namespace InfoPanel.Drawing
                             (minValue, maxValue) = ResolveAutoRange(
                                 chartDisplayItem.Guid, tempValues, chartDisplayItem.MinValue, chartDisplayItem.MaxValue, chartDisplayItem.AutoValue);
 
-                            var value = tempValues.LastOrDefault(0.0);
+                            var rawValue = tempValues.LastOrDefault(0.0);
+                            var value = rawValue;
                             var scale = maxValue - minValue;
                             value = scale <= 0 ? 0 : (value - minValue) / scale;
                             value = Math.Clamp(value, 0, 1);
@@ -542,8 +543,9 @@ namespace InfoPanel.Drawing
                             GraphDataSmoothCache.Set(chartDisplayItem.Guid, value, TimeSpan.FromSeconds(5));
 
                             var offset = 1;
+                            var donutColor = GetThresholdColor(donutDisplayItem, rawValue);
                             g.FillDonut((int)frameRect.Left + offset, (int)frameRect.Top + offset, ((int)frameRect.Width / 2) - offset, donutDisplayItem.Thickness,
-                                 0, (int)value, donutDisplayItem.Span, donutDisplayItem.Color,
+                                0, (int)value, donutDisplayItem.Span, donutColor,
                                 donutDisplayItem.Background ? donutDisplayItem.BackgroundColor : "#00000000",
                                 donutDisplayItem.Frame ? 1 : 0, donutDisplayItem.FrameColor);
 

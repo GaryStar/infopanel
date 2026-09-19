@@ -86,6 +86,14 @@
                             Grid.Column="2"
                             Margin="5,0,0,0"
                             HorizontalAlignment="Right"
+                            IsChecked="{Binding IgnoreUnitOnAutoScale}">
+                            <ui:SymbolIcon Symbol="TextBulletListTree20" ToolTip="Ignore unit magnitude on auto-scale" />
+                        </ToggleButton>
+
+                        <ToggleButton
+                            Grid.Column="2"
+                            Margin="5,0,0,0"
+                            HorizontalAlignment="Right"
                             IsChecked="{Binding SeparateUnitWithSpace}">
                             <ui:SymbolIcon Symbol="Spacebar24" ToolTip="Separate unit from value with a space" />
                         </ToggleButton>
